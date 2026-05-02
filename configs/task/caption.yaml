@@ -1,0 +1,31 @@
+task_name: caption
+# use for get prompt for flamingo
+# for get prompt of openicl
+image_field: "image"
+
+template: "${infer_model.caption_prompt_template}"
+
+column_token_map:
+  single_caption: <X>
+input_columns: ["single_caption"]
+output_column: "single_caption"
+instruction: ${infer_model.caption_instruction}
+
+
+
+sim_text_field: "single_caption"
+sim_image_field: "image"
+
+icd_text_feature_field: "single_caption"  # use for as encoding data feature
+query_text_feature_field: null
+
+# for flamingo inference
+gen_args:
+  max_new_tokens: 20
+  num_beams: 3
+  length_penalty: 0.0
+  min_new_tokens: 0
+
+other_save_field: ['single_caption', 'captions', 'image_id']
+
+split_token: "${infer_model.caption_split_token}"

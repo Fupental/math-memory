@@ -1,0 +1,16 @@
+open-flamingo
+openicl
+more_itertools
+python-dotenv
+faiss-gpu
+hydra-core
+datasets
+lightning
+omegaconf
+torch
+tqdm
+pycocotools
+pycocoevalcap
+tensorboard
+transformers==4.32.0
+loguru

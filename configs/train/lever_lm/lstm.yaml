@@ -1,0 +1,13 @@
+_target_: lever_lm.models.lstm_lever_lm.LSTMLeverLM
+
+emb_dim: 128
+dropout: 0.1
+num_layers: 2
+
+index_ds_size: ${dataset.train_ds_len}
+clip_name: openai/clip-vit-base-patch32
+freeze_prefix_list: null
+adapter: False
+norm: true
+query_encoding_flag: ???
+icd_encoding_flag: ???
