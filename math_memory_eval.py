@@ -41,6 +41,7 @@ def _lever_lm_memory_ids(
     device: str,
     shot_num: int,
     infer_batch_size: int,
+    selection_mode: str,
 ) -> List[List[int]]:
     payload = torch.load(checkpoint_path, map_location="cpu")
     metadata = payload["metadata"]
@@ -75,12 +76,16 @@ def _lever_lm_memory_ids(
         n_head=metadata["n_head"],
         n_layer=metadata["n_layer"],
         max_positions=metadata["max_positions"],
+        model_backend=metadata.get("model_backend", "gpt2"),
     )
-    model.load_state_dict(payload["model"])
+    model.load_state_dict(payload["model"], strict=False)
     run_device = torch.device(device if device == "cpu" or torch.cuda.is_available() else "cpu")
     model.to(run_device)
     model.eval()
     memory_embeddings = memory_embeddings.to(run_device)
+    debias_query_embs = (
+        query_embeddings.to(run_device) if selection_mode == "debiased" else None
+    )
 
     all_memory_ids: List[List[int]] = []
     for start in tqdm(
@@ -93,9 +98,29 @@ def _lever_lm_memory_ids(
             query_embs=query_batch,
             memory_embedding_table=memory_embeddings,
             shot_num=shot_num,
+            selection_mode=selection_mode,
+            debias_query_embs=debias_query_embs,
+            debias_batch_size=embedding_batch_size,
         )
         all_memory_ids.extend(batch_memory_ids.cpu().tolist())
     return all_memory_ids
+
+
+def _retrieval_diversity(retrievals: List[List[int]]) -> Dict:
+    if not retrievals:
+        return {
+            "unique_first_memory_count": 0,
+            "unique_second_memory_count": 0,
+            "unique_pair_count": 0,
+        }
+    first = [row[0] for row in retrievals if row]
+    second = [row[1] for row in retrievals if len(row) > 1]
+    pairs = [tuple(row) for row in retrievals]
+    return {
+        "unique_first_memory_count": len(set(first)),
+        "unique_second_memory_count": len(set(second)),
+        "unique_pair_count": len(set(pairs)),
+    }
 
 
 def _write_metrics(output_dir: Path, metrics: Dict, predictions: List[Dict]) -> None:
@@ -131,6 +156,8 @@ def main():
     parser.add_argument("--experience-file", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--checkpoint", default=None)
+    parser.add_argument("--selection-mode", choices=["raw", "debiased"], default="raw")
+    parser.add_argument("--compute-final-delta", action="store_true")
     parser.add_argument("--shot-num", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--rs-seed", type=int, default=None)
@@ -189,10 +216,13 @@ def main():
             device=args.device,
             shot_num=args.shot_num,
             infer_batch_size=args.infer_batch_size,
+            selection_mode=args.selection_mode,
         )
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        output_method = "lever_lm"
+        output_method = (
+            "lever_lm" if args.selection_mode == "raw" else f"lever_lm_{args.selection_mode}"
+        )
 
     scorer = build_scorer(
         model_name=args.scorer_model,
@@ -204,24 +234,33 @@ def main():
 
     predictions = []
     correct = 0
+    final_deltas = []
     for query, memory_ids in tqdm(
         list(zip(test_queries, retrievals)), desc=f"Evaluating {args.method}", ncols=100
     ):
         prediction, scores = scorer.predict(query, memory_ids, memories)
+        final_delta = None
+        if args.compute_final_delta:
+            empty_score, full_score = scorer.score_gold_sequences(
+                query, [[], memory_ids], memories
+            )
+            final_delta = full_score - empty_score
+            final_deltas.append(final_delta)
         is_correct = prediction == query["answer"]
         correct += int(is_correct)
-        predictions.append(
-            {
-                "query_id": query["query_id"],
-                "question_id": query["question_id"],
-                "prediction": prediction,
-                "answer": query["answer"],
-                "correct": is_correct,
-                "memory_ids": memory_ids,
-                "memory_source_ids": [memories[memory_id]["source_id"] for memory_id in memory_ids],
-                "scores": scores,
-            }
-        )
+        row = {
+            "query_id": query["query_id"],
+            "question_id": query["question_id"],
+            "prediction": prediction,
+            "answer": query["answer"],
+            "correct": is_correct,
+            "memory_ids": memory_ids,
+            "memory_source_ids": [memories[memory_id]["source_id"] for memory_id in memory_ids],
+            "scores": scores,
+        }
+        if final_delta is not None:
+            row["final_delta"] = final_delta
+        predictions.append(row)
 
     total = len(test_queries)
     metrics = {
@@ -234,7 +273,11 @@ def main():
         "split_seed": args.seed,
         "rs_seed": rs_seed,
         "train_ratio": args.train_ratio,
+        "selection_mode": args.selection_mode if args.method == "lever_lm" else "random",
+        **_retrieval_diversity(retrievals),
     }
+    if final_deltas:
+        metrics["mean_final_delta"] = sum(final_deltas) / len(final_deltas)
     _write_metrics(Path(args.output_dir), metrics, predictions)
     print(json.dumps(metrics, indent=2))
 

@@ -110,6 +110,7 @@ def main():
     parser.add_argument("--n-embd", type=int, default=512)
     parser.add_argument("--n-head", type=int, default=8)
     parser.add_argument("--n-layer", type=int, default=2)
+    parser.add_argument("--model-backend", choices=["gpt2", "simple"], default="gpt2")
     parser.add_argument("--fast-dev-run", action="store_true")
     args = parser.parse_args()
     if args.early_stop_patience < 0:
@@ -195,6 +196,7 @@ def main():
         n_embd=args.n_embd,
         n_head=args.n_head,
         n_layer=args.n_layer,
+        model_backend=args.model_backend,
     ).to(device)
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay
