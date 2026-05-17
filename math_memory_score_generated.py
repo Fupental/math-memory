@@ -50,6 +50,8 @@ def main() -> None:
     parser.add_argument("--scorer-dtype", default="bf16")
     parser.add_argument("--scorer-batch-size", type=int, default=16)
     parser.add_argument("--scorer-max-length", type=int, default=4096)
+    parser.add_argument("--scorer-device-map", default=None)
+    parser.add_argument("--scorer-max-memory", default=None)
     args = parser.parse_args()
 
     generated_path = Path(args.generated_file)
@@ -80,6 +82,8 @@ def main() -> None:
         dtype=args.scorer_dtype,
         batch_size=args.scorer_batch_size,
         max_length=args.scorer_max_length,
+        device_map=args.scorer_device_map,
+        max_memory=args.scorer_max_memory,
     )
 
     rows_by_query = _group_rows_by_query(rows)

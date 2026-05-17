@@ -55,7 +55,7 @@ Hugging Face 模型和数据集默认会使用本地缓存；离线环境需要�
 ```bash
 bash scripts/run_math_memory_pipeline.sh \
   --experience-file data/experiences.json \
-  --result-dir /root/autodl-tmp/leverlm_math_memory_split50_repeat3_beam10 \
+  --result-dir /home/fu_zhihang/projects/LeverLM/data/leverlm_math_memory_split50_repeat3_beam10 \
   --score-mode delta_logprob \
   --train-ratio 0.5 \
   --candidate-num 64 \
@@ -90,7 +90,7 @@ bash scripts/run_math_memory_pipeline.sh \
 bash scripts/run_math_memory_pipeline.sh \
   --stage train \
   --experience-file data/experiences.json \
-  --result-dir /root/autodl-tmp/leverlm_math_memory_split50_repeat3_beam10 \
+  --result-dir /home/fu_zhihang/projects/LeverLM/data/leverlm_math_memory_split50_repeat3_beam10 \
   --score-mode delta_logprob \
   --train-ratio 0.5 \
   --candidate-num 64 \
@@ -159,8 +159,8 @@ python math_memory_grpo_train.py \
   --init-mode checkpoint \
   --checkpoint /path/to/sft_best.pt \
   --experience-file data/experiences.json \
-  --output-dir /root/autodl-tmp/leverlm_math_memory_grpo/model_cpk/grpo_from_best \
-  --embedding-cache-dir /root/autodl-tmp/leverlm_math_memory/cache/math_memory_embeddings \
+  --output-dir /home/fu_zhihang/projects/LeverLM/data/leverlm_math_memory_grpo/model_cpk/grpo_from_best \
+  --embedding-cache-dir /home/fu_zhihang/projects/LeverLM/data/leverlm_math_memory/cache/math_memory_embeddings \
   --train-ratio 0.8 \
   --seed 42 \
   --shot-num 2 \
@@ -191,8 +191,8 @@ python math_memory_grpo_train.py \
 python math_memory_grpo_train.py \
   --init-mode scratch \
   --experience-file data/experiences.json \
-  --output-dir /root/autodl-tmp/leverlm_math_memory_grpo_scratch_full1080_g20/model_cpk/grpo_scratch \
-  --embedding-cache-dir /root/autodl-tmp/leverlm_math_memory_anchor400_r1/cache/math_memory_embeddings \
+  --output-dir /home/fu_zhihang/projects/LeverLM/data/leverlm_math_memory_grpo_scratch_full1080_g20/model_cpk/grpo_scratch \
+  --embedding-cache-dir /home/fu_zhihang/projects/LeverLM/data/leverlm_math_memory_anchor400_r1/cache/math_memory_embeddings \
   --embedding-model Qwen/Qwen3-Embedding-0.6B \
   --train-ratio 0.8 \
   --seed 42 \
@@ -258,11 +258,11 @@ python math_memory_eval.py \
   --compute-final-delta \
   --checkpoint /path/to/checkpoint.pt \
   --experience-file data/experiences.json \
-  --output-dir /root/autodl-tmp/exp_debiased_eval \
+  --output-dir /home/fu_zhihang/projects/LeverLM/data/exp_debiased_eval \
   --shot-num 2 \
   --train-ratio 0.5 \
   --seed 42 \
-  --embedding-cache-dir /root/autodl-tmp/leverlm_math_memory_anchor400_r1/cache/math_memory_embeddings \
+  --embedding-cache-dir /home/fu_zhihang/projects/LeverLM/data/leverlm_math_memory_anchor400_r1/cache/math_memory_embeddings \
   --embedding-model Qwen/Qwen3-Embedding-0.6B \
   --scorer-model Qwen/Qwen3-8B \
   --scorer-device cuda \
@@ -293,7 +293,7 @@ python math_memory_diagnose_grpo_collapse.py \
   --checkpoint-dir /path/to/model_cpk/grpo_scratch \
   --checkpoint-names init.pt,step_000050.pt,step_000100.pt,step_000150.pt,step_000200.pt,best.pt,last.pt \
   --experience-file data/experiences.json \
-  --embedding-cache-dir /root/autodl-tmp/leverlm_math_memory_anchor400_r1/cache/math_memory_embeddings \
+  --embedding-cache-dir /home/fu_zhihang/projects/LeverLM/data/leverlm_math_memory_anchor400_r1/cache/math_memory_embeddings \
   --embedding-model Qwen/Qwen3-Embedding-0.6B \
   --train-ratio 0.5 \
   --seed 42 \
@@ -311,9 +311,9 @@ python math_memory_diagnose_grpo_collapse.py \
 
 ```bash
 python math_memory_diagnose_successor_rank.py \
-  --checkpoint-dir /root/autodl-tmp/leverlm_math_memory_grpo_scratch_split50_g20/model_cpk/grpo_scratch \
+  --checkpoint-dir /home/fu_zhihang/projects/LeverLM/data/leverlm_math_memory_grpo_scratch_split50_g20/model_cpk/grpo_scratch \
   --experience-file data/experiences.json \
-  --embedding-cache-dir /root/autodl-tmp/leverlm_math_memory_anchor400_r1/cache/math_memory_embeddings \
+  --embedding-cache-dir /home/fu_zhihang/projects/LeverLM/data/leverlm_math_memory_anchor400_r1/cache/math_memory_embeddings \
   --embedding-model Qwen/Qwen3-Embedding-0.6B \
   --prefix-source-id G615 \
   --target-source-id G391 \

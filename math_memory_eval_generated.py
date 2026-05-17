@@ -61,6 +61,8 @@ def main():
     parser.add_argument("--scorer-dtype", default="bf16")
     parser.add_argument("--scorer-batch-size", type=int, default=4)
     parser.add_argument("--scorer-max-length", type=int, default=4096)
+    parser.add_argument("--scorer-device-map", default=None)
+    parser.add_argument("--scorer-max-memory", default=None)
     args = parser.parse_args()
 
     generated = json.load(open(args.generated_file, encoding="utf-8"))
@@ -87,6 +89,8 @@ def main():
         dtype=args.scorer_dtype,
         batch_size=args.scorer_batch_size,
         max_length=args.scorer_max_length,
+        device_map=args.scorer_device_map,
+        max_memory=args.scorer_max_memory,
     )
 
     predictions = []

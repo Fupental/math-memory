@@ -1,6 +1,6 @@
 import hashlib
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 import torch
 import torch.nn.functional as F
@@ -15,6 +15,46 @@ def _dtype_from_name(name: str):
     if name in {"fp32", "float32", "32"}:
         return torch.float32
     raise ValueError(f"Unsupported dtype: {name}")
+
+
+def _normalize_optional_arg(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    value = value.strip()
+    if not value or value.lower() in {"none", "null"}:
+        return None
+    return value
+
+
+def _parse_max_memory(value: Optional[str]) -> Optional[Dict[Any, str]]:
+    """Parse strings like '0:22GiB,1:22GiB,cpu:64GiB' for HF device_map."""
+
+    value = _normalize_optional_arg(value)
+    if value is None:
+        return None
+    result: Dict[Any, str] = {}
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if ":" not in item:
+            raise ValueError(
+                "--embedding-max-memory entries must look like '0:22GiB' or 'cpu:64GiB'"
+            )
+        key, memory = item.split(":", 1)
+        key = key.strip()
+        memory = memory.strip()
+        if not key or not memory:
+            raise ValueError(f"Invalid max_memory entry: {item!r}")
+        result[int(key) if key.isdigit() else key] = memory
+    return result or None
+
+
+def _first_parameter_device(model, fallback: torch.device) -> torch.device:
+    for param in model.parameters():
+        if param.device.type != "meta":
+            return param.device
+    return fallback
 
 
 class MockTextEmbedder:
@@ -48,10 +88,13 @@ class HFTextEmbedder:
         dtype: str = "bf16",
         max_length: int = 1024,
         trust_remote_code: bool = True,
+        device_map: Optional[str] = None,
+        max_memory: Optional[str] = None,
     ) -> None:
         from transformers import AutoModel, AutoTokenizer
 
         self.model_name = model_name
+        self.device_map = _normalize_optional_arg(device_map)
         self.device = torch.device(
             device if device == "cpu" or torch.cuda.is_available() else "cpu"
         )
@@ -61,12 +104,24 @@ class HFTextEmbedder:
         )
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+        model_kwargs = {
+            "torch_dtype": _dtype_from_name(dtype),
+            "trust_remote_code": trust_remote_code,
+        }
+        if self.device_map is not None:
+            model_kwargs["device_map"] = self.device_map
+            parsed_max_memory = _parse_max_memory(max_memory)
+            if parsed_max_memory is not None:
+                model_kwargs["max_memory"] = parsed_max_memory
         self.model = AutoModel.from_pretrained(
             model_name,
-            torch_dtype=_dtype_from_name(dtype),
-            trust_remote_code=trust_remote_code,
+            **model_kwargs,
         )
-        self.model.to(self.device)
+        if self.device_map is None:
+            self.model.to(self.device)
+            self.input_device = self.device
+        else:
+            self.input_device = _first_parameter_device(self.model, self.device)
         self.model.eval()
         for param in self.model.parameters():
             param.requires_grad_(False)
@@ -97,9 +152,10 @@ class HFTextEmbedder:
                 truncation=True,
                 max_length=self.max_length,
                 return_tensors="pt",
-            ).to(self.device)
+            ).to(self.input_device)
             outputs = self.model(**inputs)
-            pooled = self._last_token_pool(outputs.last_hidden_state, inputs["attention_mask"])
+            attention_mask = inputs["attention_mask"].to(outputs.last_hidden_state.device)
+            pooled = self._last_token_pool(outputs.last_hidden_state, attention_mask)
             pooled = F.normalize(pooled.float(), dim=-1)
             embeddings.append(pooled.cpu())
         return torch.cat(embeddings, dim=0)
@@ -111,6 +167,8 @@ def build_embedder(
     dtype: str = "bf16",
     max_length: int = 1024,
     mock_emb_dim: int = 32,
+    device_map: Optional[str] = None,
+    max_memory: Optional[str] = None,
 ):
     if model_name == "mock":
         return MockTextEmbedder(mock_emb_dim)
@@ -119,6 +177,8 @@ def build_embedder(
         device=device,
         dtype=dtype,
         max_length=max_length,
+        device_map=device_map,
+        max_memory=max_memory,
     )
 
 

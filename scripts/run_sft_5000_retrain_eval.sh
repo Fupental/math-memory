@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /root/Lever-LM
-source /root/miniconda3/etc/profile.d/conda.sh
+cd /home/fu_zhihang/projects/LeverLM/LeverLM
+source /home/fu_zhihang/miniconda3/etc/profile.d/conda.sh
 conda activate leverlm_math
 
-export HF_HOME=${HF_HOME:-/root/autodl-tmp/hf_cache}
+export HF_HOME=${HF_HOME:-/home/fu_zhihang/projects/LeverLM/data/hf_cache}
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 export TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-1}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
 export MKL_NUM_THREADS=${MKL_NUM_THREADS:-1}
 
-DATA=${DATA:-/root/autodl-tmp/leverlm_math_memory_anchor400_r1/generated_data/math_memory_shot2_cand64_repeat1_beam5_seed42.json}
+DATA=${DATA:-/home/fu_zhihang/projects/LeverLM/data/leverlm_math_memory_anchor400_r1/generated_data/math_memory_shot2_cand64_repeat1_beam5_seed42.json}
 EXPERIENCE_FILE=${EXPERIENCE_FILE:-data/experiences.json}
-CACHE=${CACHE:-/root/autodl-tmp/leverlm_math_memory_anchor400_r1/cache/math_memory_embeddings}
-RUN_DIR=${RUN_DIR:-/root/autodl-tmp/leverlm_math_memory_sft_5000_retrain_$(date +%Y%m%d_%H%M%S)}
+CACHE=${CACHE:-/home/fu_zhihang/projects/LeverLM/data/leverlm_math_memory_anchor400_r1/cache/math_memory_embeddings}
+RUN_DIR=${RUN_DIR:-/home/fu_zhihang/projects/LeverLM/data/leverlm_math_memory_sft_5000_retrain_$(date +%Y%m%d_%H%M%S)}
 CKPT_DIR=${CKPT_DIR:-${RUN_DIR}/model_cpk/sft_shot2_cand64_repeat1_beam5_seed42}
 
 EMBEDDING_MODEL=${EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-0.6B}

@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR=${ROOT_DIR:-/root/Lever-LM}
+ROOT_DIR=${ROOT_DIR:-/home/fu_zhihang/projects/LeverLM/LeverLM}
 cd "${ROOT_DIR}"
 
-source /root/miniconda3/etc/profile.d/conda.sh
+source /home/fu_zhihang/miniconda3/etc/profile.d/conda.sh
 conda activate leverlm_math
 
-export HF_HOME=${HF_HOME:-/root/autodl-tmp/hf_cache}
+export HF_HOME=${HF_HOME:-/home/fu_zhihang/projects/LeverLM/data/hf_cache}
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 export TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-1}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
 export MKL_NUM_THREADS=${MKL_NUM_THREADS:-1}
 
-SFT_CKPT=${SFT_CKPT:-/root/autodl-tmp/leverlm_math_memory_sft1080_grpo_refkl_20260505_202911/model_cpk/sft_shot2_cand64_repeat1_beam5_seed42/best.pt}
+SFT_CKPT=${SFT_CKPT:-/home/fu_zhihang/projects/LeverLM/data/leverlm_math_memory_sft1080_grpo_refkl_20260505_202911/model_cpk/sft_shot2_cand64_repeat1_beam5_seed42/best.pt}
 EXPERIENCE_FILE=${EXPERIENCE_FILE:-data/experiences.json}
-EMBEDDING_CACHE_DIR=${EMBEDDING_CACHE_DIR:-/root/autodl-tmp/leverlm_math_memory_anchor400_r1/cache/math_memory_embeddings}
+EMBEDDING_CACHE_DIR=${EMBEDDING_CACHE_DIR:-/home/fu_zhihang/projects/LeverLM/data/leverlm_math_memory_anchor400_r1/cache/math_memory_embeddings}
 EMBEDDING_MODEL=${EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-0.6B}
 SCORER_MODEL=${SCORER_MODEL:-Qwen/Qwen3-8B}
 
-RESULT_ROOT=${RESULT_ROOT:-/root/autodl-tmp/ppo_selector_compare_split80_$(date +%Y%m%d_%H%M%S)}
+RESULT_ROOT=${RESULT_ROOT:-/home/fu_zhihang/projects/LeverLM/data/ppo_selector_compare_split80_$(date +%Y%m%d_%H%M%S)}
 SEEDS=${SEEDS:-"42"}
 
 TRAIN_RATIO=${TRAIN_RATIO:-0.8}

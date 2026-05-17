@@ -1,3 +1,4 @@
+import math
 from types import SimpleNamespace
 from typing import Dict, Optional, Sequence, Tuple
 
@@ -579,6 +580,207 @@ def checkpoint_metadata(model: MathMemoryLeverLM, extra: Dict) -> Dict:
         "query_token_id": model.query_token_id,
         "vocab_size": model.vocab_size,
         "has_value_head": True,
+    }
+    metadata.update(extra)
+    return metadata
+
+
+class PointerMemoryLeverLM(nn.Module):
+    """Pointer selector over a fixed candidate set of memory embeddings."""
+
+    BOS_TOKEN = 0
+    QUERY_TOKEN = 1
+    MEM_TOKEN = 2
+    SEL1_TOKEN = 3
+    SELECTED_TOKEN = 4
+    SEL2_TOKEN = 5
+    TYPE_VOCAB_SIZE = 6
+
+    def __init__(
+        self,
+        encoder_emb_dim: int,
+        candidate_num: int = 64,
+        n_embd: int = 512,
+        n_head: int = 8,
+        n_layer: int = 2,
+        adapter_hidden_mult: int = 4,
+        max_positions: int = 80,
+        normalize_encoder_emb: bool = True,
+        pointer_key_source: str = "contextual",
+    ) -> None:
+        super().__init__()
+        if pointer_key_source not in {"contextual", "semantic"}:
+            raise ValueError(
+                "pointer_key_source must be either 'contextual' or 'semantic'"
+            )
+        self.encoder_emb_dim = encoder_emb_dim
+        self.candidate_num = candidate_num
+        self.n_embd = n_embd
+        self.n_head = n_head
+        self.n_layer = n_layer
+        self.max_positions = max_positions
+        self.normalize_encoder_emb = normalize_encoder_emb
+        self.pointer_key_source = pointer_key_source
+
+        self.type_embedding = nn.Embedding(self.TYPE_VOCAB_SIZE, n_embd)
+        self.position_embedding = nn.Embedding(max_positions, n_embd)
+        self.adapter = nn.Sequential(
+            nn.Linear(encoder_emb_dim, n_embd * adapter_hidden_mult),
+            nn.ReLU(),
+            nn.Linear(n_embd * adapter_hidden_mult, n_embd),
+        )
+        layer = nn.TransformerEncoderLayer(
+            d_model=n_embd,
+            nhead=n_head,
+            dim_feedforward=n_embd * 4,
+            batch_first=True,
+            activation="gelu",
+        )
+        self.transformer = nn.TransformerEncoder(layer, num_layers=n_layer)
+        self.final_norm = nn.LayerNorm(n_embd)
+        self.query_proj = nn.Linear(n_embd, n_embd, bias=False)
+        self.key_proj = nn.Linear(n_embd, n_embd, bias=False)
+
+    def _adapt(self, embeddings: torch.Tensor) -> torch.Tensor:
+        if self.normalize_encoder_emb:
+            embeddings = F.normalize(embeddings.float(), dim=-1)
+        return self.adapter(embeddings)
+
+    @staticmethod
+    def _attention_mask(seq_len: int, prefix_len: int, device) -> torch.Tensor:
+        mask = torch.zeros(seq_len, seq_len, dtype=torch.bool, device=device)
+        if prefix_len < seq_len:
+            mask[:prefix_len, prefix_len:] = True
+            for row in range(prefix_len, seq_len):
+                mask[row, row + 1 :] = True
+        return mask
+
+    def _type_pos_embed(self, token_type: int, position: int, batch_size: int, device):
+        type_ids = torch.full(
+            (batch_size,), token_type, dtype=torch.long, device=device
+        )
+        pos_ids = torch.full((batch_size,), position, dtype=torch.long, device=device)
+        return self.type_embedding(type_ids) + self.position_embedding(pos_ids)
+
+    def forward(
+        self,
+        query_embs: torch.Tensor,
+        candidate_embs: torch.Tensor,
+        selected_indices: Optional[torch.Tensor] = None,
+    ):
+        if candidate_embs.dim() != 3:
+            raise ValueError("candidate_embs must have shape [batch, candidate, dim]")
+        batch_size, candidate_num, _emb_dim = candidate_embs.shape
+        if candidate_num != self.candidate_num:
+            raise ValueError(
+                f"Expected candidate_num={self.candidate_num}, got {candidate_num}"
+            )
+
+        device = query_embs.device
+        prefix_len = 2 + candidate_num
+        seq_len = prefix_len + (3 if selected_indices is not None else 1)
+        if seq_len > self.max_positions:
+            raise ValueError(
+                f"seq_len={seq_len} exceeds max_positions={self.max_positions}"
+            )
+
+        inputs = torch.zeros(batch_size, seq_len, self.n_embd, device=device)
+        inputs[:, 0] = self._type_pos_embed(self.BOS_TOKEN, 0, batch_size, device)
+        inputs[:, 1] = (
+            self._type_pos_embed(self.QUERY_TOKEN, 1, batch_size, device)
+            + self._adapt(query_embs)
+        )
+
+        adapted_candidates = self._adapt(
+            candidate_embs.reshape(batch_size * candidate_num, -1)
+        ).reshape(batch_size, candidate_num, self.n_embd)
+        mem_type = self.type_embedding(
+            torch.full(
+                (batch_size, candidate_num),
+                self.MEM_TOKEN,
+                dtype=torch.long,
+                device=device,
+            )
+        )
+        mem_positions = self.position_embedding(
+            torch.arange(2, 2 + candidate_num, device=device)
+        ).unsqueeze(0)
+        inputs[:, 2 : 2 + candidate_num] = adapted_candidates + mem_type + mem_positions
+
+        sel1_pos = prefix_len
+        inputs[:, sel1_pos] = self._type_pos_embed(
+            self.SEL1_TOKEN, sel1_pos, batch_size, device
+        )
+        sel2_pos = None
+        if selected_indices is not None:
+            selected_indices = selected_indices.to(device=device, dtype=torch.long)
+            selected = adapted_candidates[
+                torch.arange(batch_size, device=device), selected_indices
+            ]
+            selected_pos = prefix_len + 1
+            sel2_pos = prefix_len + 2
+            inputs[:, selected_pos] = (
+                self._type_pos_embed(
+                    self.SELECTED_TOKEN, selected_pos, batch_size, device
+                )
+                + selected
+            )
+            inputs[:, sel2_pos] = self._type_pos_embed(
+                self.SEL2_TOKEN, sel2_pos, batch_size, device
+            )
+
+        attn_mask = self._attention_mask(seq_len, prefix_len, device)
+        hidden = self.transformer(inputs, mask=attn_mask)
+        hidden = self.final_norm(hidden)
+
+        if self.pointer_key_source == "semantic":
+            keys = self.key_proj(adapted_candidates)
+        else:
+            keys = self.key_proj(hidden[:, 2 : 2 + candidate_num])
+        q1 = self.query_proj(hidden[:, sel1_pos])
+        logits1 = torch.einsum("bd,bcd->bc", q1, keys) / math.sqrt(self.n_embd)
+        logits2 = None
+        if selected_indices is not None:
+            q2 = self.query_proj(hidden[:, sel2_pos])
+            logits2 = torch.einsum("bd,bcd->bc", q2, keys) / math.sqrt(self.n_embd)
+            logits2 = logits2.clone()
+            logits2.scatter_(1, selected_indices.unsqueeze(1), -torch.inf)
+
+        return SimpleNamespace(logits1=logits1, logits2=logits2, hidden_states=hidden)
+
+    @torch.inference_mode()
+    def generate_memory_ids(
+        self,
+        query_embs: torch.Tensor,
+        candidate_memory_ids: torch.Tensor,
+        memory_embedding_table: torch.Tensor,
+    ) -> torch.Tensor:
+        candidate_memory_ids = candidate_memory_ids.to(query_embs.device)
+        memory_embedding_table = memory_embedding_table.to(query_embs.device)
+        candidate_embs = memory_embedding_table[candidate_memory_ids]
+        first = self.forward(query_embs, candidate_embs).logits1.argmax(dim=-1)
+        output = self.forward(
+            query_embs=query_embs,
+            candidate_embs=candidate_embs,
+            selected_indices=first,
+        )
+        second = output.logits2.argmax(dim=-1)
+        local = torch.stack([first, second], dim=-1)
+        return candidate_memory_ids.gather(1, local)
+
+
+def pointer_checkpoint_metadata(model: PointerMemoryLeverLM, extra: Dict) -> Dict:
+    metadata = {
+        "model_type": "pointer_lever_lm",
+        "encoder_emb_dim": model.encoder_emb_dim,
+        "candidate_num": model.candidate_num,
+        "n_embd": model.n_embd,
+        "n_head": model.n_head,
+        "n_layer": model.n_layer,
+        "max_positions": model.max_positions,
+        "type_vocab_size": model.TYPE_VOCAB_SIZE,
+        "normalize_encoder_emb": model.normalize_encoder_emb,
+        "pointer_key_source": model.pointer_key_source,
     }
     metadata.update(extra)
     return metadata

@@ -90,12 +90,16 @@ def main():
     parser.add_argument("--embedding-dtype", default="bf16")
     parser.add_argument("--embedding-batch-size", type=int, default=16)
     parser.add_argument("--embedding-max-length", type=int, default=1024)
+    parser.add_argument("--embedding-device-map", default=None)
+    parser.add_argument("--embedding-max-memory", default=None)
     parser.add_argument("--mock-emb-dim", type=int, default=32)
     parser.add_argument("--scorer-model", default="Qwen/Qwen3-8B")
     parser.add_argument("--scorer-device", default="cuda")
     parser.add_argument("--scorer-dtype", default="bf16")
     parser.add_argument("--scorer-batch-size", type=int, default=16)
     parser.add_argument("--scorer-max-length", type=int, default=4096)
+    parser.add_argument("--scorer-device-map", default=None)
+    parser.add_argument("--scorer-max-memory", default=None)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--train-ratio", type=float, default=0.8)
@@ -285,6 +289,8 @@ def main():
         dtype=args.embedding_dtype,
         max_length=args.embedding_max_length,
         mock_emb_dim=args.mock_emb_dim,
+        device_map=args.embedding_device_map,
+        max_memory=args.embedding_max_memory,
     )
     safe_name = safe_model_name(embedding_model)
     cache_dir = Path(args.embedding_cache_dir)
@@ -439,6 +445,8 @@ def main():
         dtype=args.scorer_dtype,
         batch_size=args.scorer_batch_size,
         max_length=args.scorer_max_length,
+        device_map=args.scorer_device_map,
+        max_memory=args.scorer_max_memory,
     )
 
     history_path = output_dir / "ppo_history.csv"

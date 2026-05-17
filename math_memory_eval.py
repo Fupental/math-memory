@@ -37,6 +37,8 @@ def _lever_lm_memory_ids(
     embedding_dtype: str,
     embedding_batch_size: int,
     embedding_max_length: int,
+    embedding_device_map: str | None,
+    embedding_max_memory: str | None,
     mock_emb_dim: int,
     device: str,
     shot_num: int,
@@ -53,6 +55,8 @@ def _lever_lm_memory_ids(
         dtype=embedding_dtype,
         max_length=embedding_max_length,
         mock_emb_dim=mock_emb_dim,
+        device_map=embedding_device_map,
+        max_memory=embedding_max_memory,
     )
     safe_name = safe_model_name(embedding_model)
     cache_dir = Path(embedding_cache_dir)
@@ -170,12 +174,16 @@ def main():
     parser.add_argument("--scorer-dtype", default="bf16")
     parser.add_argument("--scorer-batch-size", type=int, default=4)
     parser.add_argument("--scorer-max-length", type=int, default=4096)
+    parser.add_argument("--scorer-device-map", default=None)
+    parser.add_argument("--scorer-max-memory", default=None)
     parser.add_argument("--embedding-cache-dir", required=True)
     parser.add_argument("--embedding-model", default=None)
     parser.add_argument("--embedding-device", default="cuda")
     parser.add_argument("--embedding-dtype", default="bf16")
     parser.add_argument("--embedding-batch-size", type=int, default=16)
     parser.add_argument("--embedding-max-length", type=int, default=1024)
+    parser.add_argument("--embedding-device-map", default=None)
+    parser.add_argument("--embedding-max-memory", default=None)
     parser.add_argument("--mock-emb-dim", type=int, default=32)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--infer-batch-size", type=int, default=32)
@@ -212,6 +220,8 @@ def main():
             embedding_dtype=args.embedding_dtype,
             embedding_batch_size=args.embedding_batch_size,
             embedding_max_length=args.embedding_max_length,
+            embedding_device_map=args.embedding_device_map,
+            embedding_max_memory=args.embedding_max_memory,
             mock_emb_dim=args.mock_emb_dim,
             device=args.device,
             shot_num=args.shot_num,
@@ -230,6 +240,8 @@ def main():
         dtype=args.scorer_dtype,
         batch_size=args.scorer_batch_size,
         max_length=args.scorer_max_length,
+        device_map=args.scorer_device_map,
+        max_memory=args.scorer_max_memory,
     )
 
     predictions = []

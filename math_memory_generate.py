@@ -1,6 +1,8 @@
 import argparse
 import json
 import random
+import shlex
+import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -19,6 +21,10 @@ def _top_beams(
 ) -> List[Tuple[List[int], float]]:
     proposals.sort(key=lambda item: item[1], reverse=True)
     return proposals[:beam_size]
+
+
+def _command_text() -> str:
+    return " ".join(shlex.quote(part) for part in [sys.executable, *sys.argv])
 
 
 def generate_for_query(
@@ -81,23 +87,41 @@ def generate_for_query(
                 proposals.extend(zip(memory_sequences, scores))
             beams = _top_beams(proposals, beam_size)
 
+        empty_score = get_absolute_scores([[]])[0]
         for rank, (memory_ids, score) in enumerate(beams):
-            rows.append(
-                {
-                    "query_id": query["query_id"],
-                    "question_id": query["question_id"],
-                    "repeat": repeat_idx,
-                    "rank": rank,
-                    "memory_ids": memory_ids,
-                    "score": float(score),
-                }
-            )
+            prefix_ids = memory_ids[:-1]
+            prefix_score = get_absolute_scores([prefix_ids])[0]
+            full_score = get_absolute_scores([memory_ids])[0]
+            row = {
+                "query_id": query["query_id"],
+                "question_id": query["question_id"],
+                "repeat": repeat_idx,
+                "rank": rank,
+                "memory_ids": memory_ids,
+                "score": float(score),
+                "empty_score": float(empty_score),
+                "prefix_score": float(prefix_score),
+                "full_score": float(full_score),
+                "total_score": float(full_score - empty_score),
+                "total_delta": float(full_score - empty_score),
+                "candidate_ids": candidate_ids,
+                "candidate_source_ids": [
+                    memories[memory_id]["source_id"] for memory_id in candidate_ids
+                ],
+            }
+            previous_score = empty_score
+            for step in range(len(memory_ids)):
+                current_score = get_absolute_scores([memory_ids[: step + 1]])[0]
+                row[f"step{step}_delta"] = float(current_score - previous_score)
+                previous_score = current_score
+            rows.append(row)
     return rows
 
 
 def _build_metadata(args, memories: List[Dict], train_queries: List[Dict], test_queries: List[Dict]) -> Dict:
     return {
         "task": "mmlu_pro_math_memory",
+        "candidate_mode": "random",
         "shot_num": args.shot_num,
         "candidate_num": args.candidate_num,
         "repeat": args.repeat,
@@ -112,12 +136,14 @@ def _build_metadata(args, memories: List[Dict], train_queries: List[Dict], test_
         "train_query_count": len(train_queries),
         "test_query_count": len(test_queries),
         "resume_enabled": True,
+        "command": _command_text(),
     }
 
 
 def _metadata_matches(existing: Dict, expected: Dict) -> bool:
     keys = [
         "task",
+        "candidate_mode",
         "shot_num",
         "candidate_num",
         "repeat",
@@ -224,6 +250,8 @@ def main():
     parser.add_argument("--scorer-dtype", default="bf16")
     parser.add_argument("--scorer-batch-size", type=int, default=4)
     parser.add_argument("--scorer-max-length", type=int, default=4096)
+    parser.add_argument("--scorer-device-map", default=None)
+    parser.add_argument("--scorer-max-memory", default=None)
     parser.add_argument(
         "--overwrite",
         action="store_true",
@@ -253,6 +281,8 @@ def main():
     output_path = Path(args.output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     progress_path = _progress_path(output_path)
+    command_path = output_path.with_name(f"{output_path.stem}_command.txt")
+    command_path.write_text(_command_text() + "\n", encoding="utf-8")
     metadata = _build_metadata(args, memories, train_queries, test_queries)
     expected_rows_per_query = args.repeat * args.beam_size
     expected_total_rows = len(train_queries) * expected_rows_per_query
@@ -284,6 +314,8 @@ def main():
         dtype=args.scorer_dtype,
         batch_size=args.scorer_batch_size,
         max_length=args.scorer_max_length,
+        device_map=args.scorer_device_map,
+        max_memory=args.scorer_max_memory,
     )
 
     for query in tqdm(train_queries, desc="Generating D_M", ncols=100):
@@ -313,6 +345,7 @@ def main():
     metadata["is_complete"] = len(rows) == expected_total_rows
     _write_output_atomic(output_path, metadata, rows)
     print(f"Saved {len(rows)} training sequences to {output_path}")
+    print(f"Command saved to {command_path}")
 
 
 if __name__ == "__main__":

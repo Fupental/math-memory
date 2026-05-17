@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /root/Lever-LM
-source /root/miniconda3/etc/profile.d/conda.sh
+cd /home/fu_zhihang/projects/LeverLM/LeverLM
+source /home/fu_zhihang/miniconda3/etc/profile.d/conda.sh
 conda activate leverlm_math
 
-export HF_HOME=/root/autodl-tmp/hf_cache
+export HF_HOME=/home/fu_zhihang/projects/LeverLM/data/hf_cache
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 
-DATA=/root/autodl-tmp/leverlm_math_memory_anchor400_r1/generated_data/math_memory_shot2_cand64_repeat1_beam5_seed42_scored.json
-CACHE=/root/autodl-tmp/leverlm_math_memory_anchor400_r1/cache/math_memory_embeddings
-RUN_DIR=/root/autodl-tmp/leverlm_math_memory_sft_scored_retrain_$(date +%Y%m%d_%H%M%S)
+DATA=/home/fu_zhihang/projects/LeverLM/data/leverlm_math_memory_anchor400_r1/generated_data/math_memory_shot2_cand64_repeat1_beam5_seed42_scored.json
+CACHE=/home/fu_zhihang/projects/LeverLM/data/leverlm_math_memory_anchor400_r1/cache/math_memory_embeddings
+RUN_DIR=/home/fu_zhihang/projects/LeverLM/data/leverlm_math_memory_sft_scored_retrain_$(date +%Y%m%d_%H%M%S)
 CKPT_DIR=${RUN_DIR}/model_cpk/sft_scored_shot2_cand64_repeat1_beam5_seed42
 
 if [[ ! -f "${DATA}" ]]; then

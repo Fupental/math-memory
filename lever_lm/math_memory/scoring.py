@@ -1,5 +1,5 @@
 import hashlib
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import torch
 from tqdm import tqdm
@@ -20,6 +20,46 @@ def _dtype_from_name(name: str):
 def _batched(items: List[Any], batch_size: int) -> Iterable[List[Any]]:
     for start in range(0, len(items), batch_size):
         yield items[start : start + batch_size]
+
+
+def _normalize_optional_arg(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    value = value.strip()
+    if not value or value.lower() in {"none", "null"}:
+        return None
+    return value
+
+
+def _parse_max_memory(value: Optional[str]) -> Optional[Dict[Any, str]]:
+    """Parse strings like '0:22GiB,1:22GiB,cpu:64GiB' for HF device_map."""
+
+    value = _normalize_optional_arg(value)
+    if value is None:
+        return None
+    result: Dict[Any, str] = {}
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if ":" not in item:
+            raise ValueError(
+                "--scorer-max-memory entries must look like '0:22GiB' or 'cpu:64GiB'"
+            )
+        key, memory = item.split(":", 1)
+        key = key.strip()
+        memory = memory.strip()
+        if not key or not memory:
+            raise ValueError(f"Invalid max_memory entry: {item!r}")
+        result[int(key) if key.isdigit() else key] = memory
+    return result or None
+
+
+def _first_parameter_device(model, fallback: torch.device) -> torch.device:
+    for param in model.parameters():
+        if param.device.type != "meta":
+            return param.device
+    return fallback
 
 
 class MockChoiceScorer:
@@ -74,10 +114,13 @@ class QwenChoiceScorer:
         max_length: int = 4096,
         trust_remote_code: bool = True,
         use_chat_template: bool = True,
+        device_map: Optional[str] = None,
+        max_memory: Optional[str] = None,
     ) -> None:
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         self.model_name = model_name
+        self.device_map = _normalize_optional_arg(device_map)
         self.device = torch.device(
             device if device == "cpu" or torch.cuda.is_available() else "cpu"
         )
@@ -90,12 +133,24 @@ class QwenChoiceScorer:
         )
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+        model_kwargs = {
+            "torch_dtype": _dtype_from_name(dtype),
+            "trust_remote_code": trust_remote_code,
+        }
+        if self.device_map is not None:
+            model_kwargs["device_map"] = self.device_map
+            parsed_max_memory = _parse_max_memory(max_memory)
+            if parsed_max_memory is not None:
+                model_kwargs["max_memory"] = parsed_max_memory
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            torch_dtype=_dtype_from_name(dtype),
-            trust_remote_code=trust_remote_code,
+            **model_kwargs,
         )
-        self.model.to(self.device)
+        if self.device_map is None:
+            self.model.to(self.device)
+            self.input_device = self.device
+        else:
+            self.input_device = _first_parameter_device(self.model, self.device)
         self.model.eval()
 
     def _render_prompt(
@@ -186,18 +241,21 @@ class QwenChoiceScorer:
                 attention_rows.append([1] * len(input_ids) + [0] * pad_len)
                 mask_rows.append(label_mask + [0] * pad_len)
 
-            input_tensor = torch.tensor(input_rows, dtype=torch.long, device=self.device)
+            input_tensor = torch.tensor(
+                input_rows, dtype=torch.long, device=self.input_device
+            )
             attention_mask = torch.tensor(
-                attention_rows, dtype=torch.long, device=self.device
+                attention_rows, dtype=torch.long, device=self.input_device
             )
             label_mask_tensor = torch.tensor(
-                mask_rows, dtype=torch.bool, device=self.device
+                mask_rows, dtype=torch.bool, device=self.input_device
             )
 
             output = self.model(input_ids=input_tensor, attention_mask=attention_mask)
             log_probs = torch.log_softmax(output.logits[:, :-1, :], dim=-1)
-            target_ids = input_tensor[:, 1:]
-            target_mask = label_mask_tensor[:, 1:]
+            output_device = log_probs.device
+            target_ids = input_tensor[:, 1:].to(output_device)
+            target_mask = label_mask_tensor[:, 1:].to(output_device)
             token_scores = log_probs.gather(-1, target_ids.unsqueeze(-1)).squeeze(-1)
             token_scores = token_scores.masked_fill(~target_mask, 0.0)
             scores.extend(token_scores.sum(dim=-1).float().cpu().tolist())
@@ -213,7 +271,9 @@ class QwenChoiceScorer:
         if not label_token_ids:
             raise ValueError("Next-token scoring requires single-token labels")
 
-        label_tensor = torch.tensor(label_token_ids, dtype=torch.long, device=self.device)
+        label_tensor = torch.tensor(
+            label_token_ids, dtype=torch.long, device=self.input_device
+        )
         all_scores: List[List[float]] = []
         for batch in _batched(prompts, self.batch_size):
             encoded = [
@@ -228,17 +288,24 @@ class QwenChoiceScorer:
                 input_rows.append(input_ids + [self.tokenizer.pad_token_id] * pad_len)
                 attention_rows.append([1] * len(input_ids) + [0] * pad_len)
 
-            input_tensor = torch.tensor(input_rows, dtype=torch.long, device=self.device)
+            input_tensor = torch.tensor(
+                input_rows, dtype=torch.long, device=self.input_device
+            )
             attention_mask = torch.tensor(
-                attention_rows, dtype=torch.long, device=self.device
+                attention_rows, dtype=torch.long, device=self.input_device
             )
 
             output = self.model(input_ids=input_tensor, attention_mask=attention_mask)
+            logits = output.logits
+            output_device = logits.device
+            input_tensor = input_tensor.to(output_device)
+            attention_mask = attention_mask.to(output_device)
+            label_tensor_on_output = label_tensor.to(output_device)
             last_token_indices = attention_mask.sum(dim=1) - 1
-            batch_indices = torch.arange(input_tensor.size(0), device=self.device)
-            next_logits = output.logits[batch_indices, last_token_indices, :]
+            batch_indices = torch.arange(input_tensor.size(0), device=output_device)
+            next_logits = logits[batch_indices, last_token_indices, :]
             log_probs = torch.log_softmax(next_logits, dim=-1)
-            batch_scores = log_probs.index_select(dim=-1, index=label_tensor)
+            batch_scores = log_probs.index_select(dim=-1, index=label_tensor_on_output)
             all_scores.extend(batch_scores.float().cpu().tolist())
         return all_scores
 
@@ -289,6 +356,8 @@ def build_scorer(
     dtype: str,
     batch_size: int,
     max_length: int,
+    device_map: Optional[str] = None,
+    max_memory: Optional[str] = None,
 ):
     if model_name == "mock":
         return MockChoiceScorer()
@@ -298,6 +367,8 @@ def build_scorer(
         dtype=dtype,
         batch_size=batch_size,
         max_length=max_length,
+        device_map=device_map,
+        max_memory=max_memory,
     )
 
 
